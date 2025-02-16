@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using TriInspector;
 using TriInspector.Drawers;
@@ -43,6 +43,7 @@ namespace TriInspector.Drawers
             private bool _heightDirty;
             private bool _isExpanded;
             private int _arraySize;
+            private string _searchText = "";
 
             public TableElement(TriProperty property) : base(property)
             {
@@ -98,9 +99,14 @@ namespace TriInspector.Drawers
                 {
                     height = ListGui.headerHeight,
                 };
+                var searchRect = new Rect(headerRect)
+                {
+                    y = headerRect.yMax,
+                    height = EditorGUIUtility.singleLineHeight
+                };
                 var elementsRect = new Rect(position)
                 {
-                    yMin = headerRect.yMax,
+                    yMin = searchRect.yMax,
                     height = _treeView.totalHeight + FooterExtraSpace,
                 };
                 var elementsContentRect = new Rect(elementsRect)
@@ -114,10 +120,20 @@ namespace TriInspector.Drawers
                     yMin = elementsRect.yMax,
                 };
 
+                if (_property.IsExpanded)
+                    _searchText = EditorGUI.TextField(searchRect, _searchText, EditorStyles.toolbarSearchField);
+
                 if (!_property.IsExpanded)
                 {
                     ReorderableListProxy.DoListHeader(ListGui, headerRect);
                     return;
+                }
+
+                if (GUI.changed)
+                {
+                    _treeView.SetSearchText(_searchText);
+                    _reloadRequired = true;
+                    _property.PropertyTree.RequestRepaint();
                 }
 
                 if (Event.current.isMouse && Event.current.type == EventType.MouseDrag)
@@ -183,10 +199,55 @@ namespace TriInspector.Drawers
             private readonly TriElement _cellElementContainer;
             private readonly ReorderableList _listGui;
             private readonly TableListPropertyOverrideContext _propertyOverrideContext;
-
+            private List<int> _filteredIndices = new List<int>();
+            private string _searchText = "";
             private bool _wasRendered;
 
             public Action<int> SelectionChangedCallback;
+
+            public void SetSearchText(string searchText)
+            {
+                if (_searchText != searchText)
+                {
+                    _searchText = searchText;
+                    UpdateFilteredIndices();
+                    Reload();
+                }
+            }
+
+            private void UpdateFilteredIndices()
+            {
+                _filteredIndices.Clear();
+                for (int i = 0; i < _property.ArrayElementProperties.Count; i++)
+                {
+                    if (IsElementMatch(_property.ArrayElementProperties[i]))
+                        _filteredIndices.Add(i);
+                }
+            }
+
+            private bool IsElementMatch(TriProperty element)
+            {
+                if (string.IsNullOrEmpty(_searchText)) return true;
+
+                foreach (var child in element.ChildrenProperties)
+                    if (CheckProperty(child)) return true;
+
+                return false;
+            }
+
+            private bool CheckProperty(TriProperty property)
+            {
+                if (!(property.PropertyType == TriPropertyType.Generic || property.PropertyType == TriPropertyType.Reference) || property.ChildrenProperties.Count == 0)
+                {
+                    var val = property.GetValue(0)?.ToString();
+                    return val?.IndexOf(_searchText, StringComparison.OrdinalIgnoreCase) >= 0;
+                }
+
+                foreach (var child in property.ChildrenProperties)
+                    if (CheckProperty(child)) return true;
+
+                return false;
+            }
 
             public TableMultiColumnTreeView(TriProperty property, TriElement container, ReorderableList listGui)
                 : base(new TreeViewState(), new TableColumnHeader())
@@ -234,7 +295,8 @@ namespace TriInspector.Drawers
 
                 if (_property.IsExpanded)
                 {
-                    for (var index = 0; index < _property.ArrayElementProperties.Count; index++)
+                    UpdateFilteredIndices();
+                    foreach (var index in _filteredIndices)
                     {
                         var rowChildProperty = _property.ArrayElementProperties[index];
                         root.AddChild(new TableTreeItem(index, rowChildProperty));
@@ -276,8 +338,10 @@ namespace TriInspector.Drawers
                     return EditorGUIUtility.singleLineHeight;
                 }
 
+                var originalIndex = ((TableTreeItem) item).OriginalIndex;
+                var rowElement = (TableRowElement) _cellElementContainer.GetChild(originalIndex);
+
                 var height = 0f;
-                var rowElement = (TableRowElement) _cellElementContainer.GetChild(row);
 
                 foreach (var visibleColumnIndex in multiColumnHeader.state.visibleColumns)
                 {
@@ -302,8 +366,8 @@ namespace TriInspector.Drawers
                     base.RowGUI(args);
                     return;
                 }
-
-                var rowElement = (TableRowElement) _cellElementContainer.GetChild(args.row);
+                var originalIndex = ((TableTreeItem) args.item).OriginalIndex;
+                var rowElement = (TableRowElement) _cellElementContainer.GetChild(originalIndex);
 
                 for (var i = 0; i < multiColumnHeader.state.visibleColumns.Length; i++)
                 {
@@ -400,8 +464,11 @@ namespace TriInspector.Drawers
         [Serializable]
         private class TableTreeItem : TreeViewItem
         {
-            public TableTreeItem(int id, TriProperty property) : base(id, 0)
+            public int OriginalIndex { get; }
+            public TableTreeItem(int originalIndex, TriProperty property)
+                : base(originalIndex, 0)
             {
+                OriginalIndex = originalIndex;
                 Property = property;
             }
 
