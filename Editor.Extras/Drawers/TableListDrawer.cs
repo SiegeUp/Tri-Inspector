@@ -43,7 +43,7 @@ namespace TriInspector.Drawers
             private bool _heightDirty;
             private bool _isExpanded;
             private int _arraySize;
-            private string _searchText = "";
+            private string searchText = "";
 
             public TableElement(TriProperty property) : base(property)
             {
@@ -95,33 +95,39 @@ namespace TriInspector.Drawers
 
             public override void OnGUI(Rect position)
             {
+                bool isSearchable = _property.IsExpanded && SearchableUtils.HasSearchableAttribute(_property);
+
                 var headerRect = new Rect(position)
                 {
                     height = ListGui.headerHeight,
                 };
+
                 var searchRect = new Rect(headerRect)
                 {
                     y = headerRect.yMax,
                     height = EditorGUIUtility.singleLineHeight
                 };
+
                 var elementsRect = new Rect(position)
                 {
-                    yMin = searchRect.yMax,
+                    yMin = isSearchable ? searchRect.yMax : headerRect.yMax,
                     height = _treeView.totalHeight + FooterExtraSpace,
                 };
+
                 var elementsContentRect = new Rect(elementsRect)
                 {
                     xMin = elementsRect.xMin + 1,
                     xMax = elementsRect.xMax - 1,
                     yMax = elementsRect.yMax - FooterExtraSpace,
                 };
+
                 var footerRect = new Rect(position)
                 {
                     yMin = elementsRect.yMax,
                 };
 
-                if (_property.IsExpanded)
-                    _searchText = EditorGUI.TextField(searchRect, _searchText, EditorStyles.toolbarSearchField);
+                if (isSearchable)
+                    searchText = EditorGUI.TextField(searchRect, searchText, EditorStyles.toolbarSearchField);
 
                 if (!_property.IsExpanded)
                 {
@@ -131,7 +137,7 @@ namespace TriInspector.Drawers
 
                 if (GUI.changed)
                 {
-                    _treeView.SetSearchText(_searchText);
+                    _treeView.SetSearchText(searchText);
                     _reloadRequired = true;
                     _property.PropertyTree.RequestRepaint();
                 }
@@ -217,36 +223,7 @@ namespace TriInspector.Drawers
 
             private void UpdateFilteredIndices()
             {
-                _filteredIndices.Clear();
-                for (int i = 0; i < _property.ArrayElementProperties.Count; i++)
-                {
-                    if (IsElementMatch(_property.ArrayElementProperties[i]))
-                        _filteredIndices.Add(i);
-                }
-            }
-
-            private bool IsElementMatch(TriProperty element)
-            {
-                if (string.IsNullOrEmpty(_searchText)) return true;
-
-                foreach (var child in element.ChildrenProperties)
-                    if (CheckProperty(child)) return true;
-
-                return false;
-            }
-
-            private bool CheckProperty(TriProperty property)
-            {
-                if (!(property.PropertyType == TriPropertyType.Generic || property.PropertyType == TriPropertyType.Reference) || property.ChildrenProperties.Count == 0)
-                {
-                    var val = property.GetValue(0)?.ToString();
-                    return val?.IndexOf(_searchText, StringComparison.OrdinalIgnoreCase) >= 0;
-                }
-
-                foreach (var child in property.ChildrenProperties)
-                    if (CheckProperty(child)) return true;
-
-                return false;
+                _filteredIndices = SearchableUtils.FilterIndices(_property.ArrayElementProperties, _searchText);
             }
 
             public TableMultiColumnTreeView(TriProperty property, TriElement container, ReorderableList listGui)
